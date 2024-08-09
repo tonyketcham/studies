@@ -1,5 +1,11 @@
-import { useRef, useState, useDeferredValue, useCallback } from 'react';
-import { Line, Rect } from '@svgdotjs/svg.js';
+import {
+  useState,
+  useDeferredValue,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
+import { G, Line, Rect } from '@svgdotjs/svg.js';
 import '../../lib/svg.draggable.ts';
 import { useSvgContainer, useSvgEffect } from '@/components/svg-js/useSvg';
 import { SvgContainer } from '@/components/svg-js/SvgContainer';
@@ -41,11 +47,53 @@ export function LSystemSVG() {
   const deferredPhototropism = useDeferredValue(phototropism);
   const deferredIterations = useDeferredValue(iterations);
 
-  const sentence = useRef(axiom);
+  const sentence = useMemo(() => {
+    let currentSentence = axiom;
+    for (let i = 0; i < deferredIterations; i++) {
+      currentSentence = currentSentence
+        .split('')
+        .map((char) => rules[char as keyof typeof rules] || char)
+        .join('');
+    }
+    return currentSentence;
+  }, [axiom, rules, deferredIterations]);
+
+  const group = useRef<G | null>(null);
 
   useSvgEffect(
     svgContainer,
     (svg) => {
+      group.current = svg.group();
+      const dragBackground = new Rect()
+        .attr('width', '100%')
+        .attr('height', '100%')
+        .stroke('none')
+        .attr('class', removeOnExportClass);
+
+      group.current.add(dragBackground);
+      group.current.stroke('white');
+
+      // @ts-expect-error this type import is a bit broken but this is a personal hackathon and it works so ¯\_(ツ)_/¯
+      group.current.draggable(true, {
+        onEnd() {
+          // Reset the position of the group so that it's always grabbable from the same spot on the screen after a translation which would otherwise move this element offscreen
+          dragBackground.move(0, 0);
+        },
+      });
+
+      svg.add(group.current);
+
+      return () => {
+        if (group.current) group.current.remove();
+        dragBackground.remove();
+      };
+    },
+    []
+  );
+
+  useSvgEffect(
+    svgContainer,
+    () => {
       const lengthFactor = 0.7; // Factor by which the length is reduced each iteration
       const start = { x: 100, y: 100, angle: 45 };
       const stack: Node[] = [];
@@ -53,41 +101,9 @@ export function LSystemSVG() {
 
       const lines: Line[] = [];
 
-      for (let i = 0; i < deferredIterations; i++) {
-        const nextString = sentence.current
-          .split('')
-          .map((char) =>
-            rules[char as keyof typeof rules]
-              ? rules[char as keyof typeof rules]
-              : char
-          )
-          .join('');
-        sentence.current = nextString;
-      }
-
-      const group = svg.group();
-      const dragBackground = new Rect()
-        .attr('width', '100%')
-        .attr('height', '100%')
-        .stroke('none')
-        .attr('class', removeOnExportClass);
-
-      group.add(dragBackground);
-      group.stroke('white');
-
-      // @ts-expect-error this type import is a bit broken but this is a personal hackathon and it works so ¯\_(ツ)_/¯
-      group.draggable(true, {
-        onEnd() {
-          // Reset the position of the group so that it's always grabbable from the same spot on the screen after a translation which would otherwise move this element offscreen
-          dragBackground.move(0, 0);
-        },
-      });
-
-      svg.add(group);
-
-      sentence.current.split('').forEach((char, index) => {
+      sentence.split('').forEach((char, index) => {
         const iterationLevel = Math.floor(
-          (index / sentence.current.length) * deferredIterations
+          (index / sentence.length) * deferredIterations
         );
         const length =
           deferredInitialLength * Math.pow(lengthFactor, iterationLevel);
@@ -102,7 +118,7 @@ export function LSystemSVG() {
             .plot(current.x, current.y, nextX, nextY)
             .stroke({ width: 1 });
 
-          group.add(line);
+          if (group.current) group.current.add(line);
 
           lines.push(line);
 
@@ -130,9 +146,6 @@ export function LSystemSVG() {
       });
 
       return () => {
-        sentence.current = axiom;
-        group.remove();
-        dragBackground.remove();
         lines.forEach((line) => line.remove());
       };
     },
