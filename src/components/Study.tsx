@@ -20,9 +20,11 @@ export function Study({
             <Crumbs path={path} />
           </Header>
         </div>
-        <section className="m-4 border shadow-lg pointer-events-auto rounded-xl w-80 bg-white/60 border-neutral-400 dark:bg-neutral-900/30 dark:border-neutral-700 backdrop-blur-md">
-          {sidebarChildren}
-        </section>
+        <div className="m-4 w-80">
+          <section className="w-full border shadow-lg pointer-events-auto rounded-xl bg-white/60 dark:border-neutral-900 outline outline-1 outline-offset-2 outline-neutral-400 dark:bg-neutral-900/40 dark:outline-neutral-600 backdrop-blur-lg">
+            {sidebarChildren}
+          </section>
+        </div>
       </div>
     </>
   );

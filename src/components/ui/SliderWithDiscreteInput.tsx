@@ -20,9 +20,11 @@ export function SliderWithDiscreteInput({
   onChange,
 }: SliderWithDiscreteInputProps) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex flex-row items-center justify-between">
-        <Label htmlFor={label}>{label}</Label>
+        <Label htmlFor={label} className="text-sm">
+          {label}
+        </Label>
         <Input
           aria-describedby={label}
           type="number"

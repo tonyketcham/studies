@@ -1,10 +1,13 @@
 import { useRef, useState, useDeferredValue, useCallback } from 'react';
-import { Line } from '@svgdotjs/svg.js';
+import { Line, Rect } from '@svgdotjs/svg.js';
+import '../../lib/svg.draggable.ts';
 import { useSvgContainer, useSvgEffect } from '@/components/svg-js/useSvg';
 import { SvgContainer } from '@/components/svg-js/SvgContainer';
 import { InPortal } from '@/components/portal/InPortal';
 import { SliderWithDiscreteInput } from '@/components/ui/SliderWithDiscreteInput';
 import { Button } from '@/components/ui/button';
+
+const removeOnExportClass = 'remove-on-export';
 
 type Node = {
   x: number;
@@ -20,9 +23,13 @@ export function LSystemSVG() {
   // angle: 30
   // iterations: 5
   const axiom = 'A';
+  // const rules = {
+  //   A: 'AB',
+  //   B: 'A[+B][-B]',
+  // };
   const rules = {
     A: 'AB',
-    B: 'A[+B][-B]',
+    B: 'A[[+B--B]A]',
   };
   const [initialLength, setInitialLength] = useState(20);
   const [angle, setAngle] = useState(30);
@@ -59,6 +66,24 @@ export function LSystemSVG() {
         sentence.current = nextString;
       }
 
+      const group = svg.group();
+      const dragBackground = new Rect()
+        .attr('width', '100%')
+        .attr('height', '100%')
+        .attr('class', removeOnExportClass)
+        .fill('black');
+      group.add(dragBackground);
+
+      // @ts-expect-error this type import is a bit broken but this is a personal hackathon and it works so ¯\_(ツ)_/¯
+      group.draggable(true, {
+        onEnd() {
+          // Reset the position of the group so that it's always grabbable from the same spot on the screen after a translation which would otherwise move this element offscreen
+          dragBackground.move(0, 0);
+        },
+      });
+
+      svg.add(group);
+
       sentence.current.split('').forEach((char, index) => {
         const iterationLevel = Math.floor(
           (index / sentence.current.length) * deferredIterations
@@ -76,7 +101,7 @@ export function LSystemSVG() {
             .plot(current.x, current.y, nextX, nextY)
             .stroke({ width: 1, color: 'white' });
 
-          svg.add(line);
+          group.add(line);
 
           lines.push(line);
 
@@ -105,6 +130,8 @@ export function LSystemSVG() {
 
       return () => {
         sentence.current = axiom;
+        group.remove();
+        dragBackground.remove();
         lines.forEach((line) => line.remove());
       };
     },
@@ -120,7 +147,16 @@ export function LSystemSVG() {
   const downloadSvg = useCallback(() => {
     if (svgContainer?.svg.node) {
       const serializer = new XMLSerializer();
-      const svgString = serializer.serializeToString(svgContainer?.svg.node);
+      const nodeCopy = svgContainer.svg.node.cloneNode(true);
+
+      if (nodeCopy instanceof Element) {
+        // remove interaction-only elements
+        nodeCopy.querySelectorAll(`.${removeOnExportClass}`).forEach((el) => {
+          el.remove();
+        });
+      }
+
+      const svgString = serializer.serializeToString(nodeCopy);
       const blob = new Blob([svgString], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -136,7 +172,7 @@ export function LSystemSVG() {
   return (
     <>
       <InPortal>
-        <div className="p-4 space-y-4">
+        <div className="flex flex-col p-4 space-y-5">
           <SliderWithDiscreteInput
             label="Scale"
             min={1}
@@ -169,7 +205,10 @@ export function LSystemSVG() {
             value={iterations}
             onChange={(v) => setIterations(v)}
           />
-          <Button onClick={downloadSvg} className="!mt-8">
+          <Button
+            onClick={downloadSvg}
+            className="!mt-8 place-self-center w-full"
+          >
             Download
           </Button>
         </div>

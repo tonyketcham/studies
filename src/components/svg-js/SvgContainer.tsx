@@ -24,7 +24,7 @@ export function SvgContainer(props: SvgContainerProps) {
   return (
     <div
       ref={wrapper}
-      className="mix-blend-difference"
+      className="mix-blend-difference cursor-grab active:cursor-grabbing"
       style={{
         margin: props.margin,
         height: props.height,
