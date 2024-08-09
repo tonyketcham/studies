@@ -70,9 +70,11 @@ export function LSystemSVG() {
       const dragBackground = new Rect()
         .attr('width', '100%')
         .attr('height', '100%')
-        .attr('class', removeOnExportClass)
-        .fill('black');
+        .stroke('none')
+        .attr('class', removeOnExportClass);
+
       group.add(dragBackground);
+      group.stroke('white');
 
       // @ts-expect-error this type import is a bit broken but this is a personal hackathon and it works so ¯\_(ツ)_/¯
       group.draggable(true, {
@@ -99,7 +101,7 @@ export function LSystemSVG() {
 
           const line = new Line()
             .plot(current.x, current.y, nextX, nextY)
-            .stroke({ width: 1, color: 'white' });
+            .stroke({ width: 1 });
 
           group.add(line);
 
