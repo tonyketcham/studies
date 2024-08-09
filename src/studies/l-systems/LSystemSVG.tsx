@@ -6,6 +6,9 @@ import { SvgContainer } from '@/components/svg-js/SvgContainer';
 import { InPortal } from '@/components/portal/InPortal';
 import { SliderWithDiscreteInput } from '@/components/ui/SliderWithDiscreteInput';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input.tsx';
+import { Label } from '@/components/ui/label.tsx';
+import { MoveRight } from 'lucide-react';
 
 const removeOnExportClass = 'remove-on-export';
 
@@ -18,19 +21,15 @@ type Node = {
 export function LSystemSVG() {
   const { setHandles, svgContainer } = useSvgContainer();
 
-  // axiom: A
-  // rules: A -> AB, B -> A
-  // angle: 30
-  // iterations: 5
-  const axiom = 'A';
   // const rules = {
-  //   A: 'AB',
-  //   B: 'A[+B][-B]',
+  //   F: 'FB',
+  //   B: 'F[+B][-B]',
   // };
-  const rules = {
-    A: 'AB',
-    B: 'A[[+B--B]A]',
-  };
+  const [axiom, setAxiom] = useState('F');
+  const [rules, setRules] = useState({
+    F: 'FB',
+    B: 'F[[+B--B]F]',
+  });
   const [initialLength, setInitialLength] = useState(20);
   const [angle, setAngle] = useState(30);
   const [phototropism, setPhototropism] = useState(1.01);
@@ -93,7 +92,7 @@ export function LSystemSVG() {
         const length =
           deferredInitialLength * Math.pow(lengthFactor, iterationLevel);
 
-        if (char === 'A') {
+        if (char === 'F') {
           const nextX =
             current.x + length * Math.cos((current.angle * Math.PI) / 180);
           const nextY =
@@ -138,6 +137,8 @@ export function LSystemSVG() {
       };
     },
     [
+      axiom,
+      rules,
       deferredInitialLength,
       deferredIterations,
       deferredPhototropism,
@@ -163,18 +164,71 @@ export function LSystemSVG() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'lsystem.svg';
+      // encode properties as the filename
+      const encodedProps = formatObjectForFilename({
+        axiom,
+        rules,
+        initialLength,
+        angle,
+        phototropism,
+        iterations,
+      });
+
+      link.download = `lsystem-${encodedProps}.svg`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     }
-  }, [svgContainer?.svg.node]);
+  }, [
+    angle,
+    axiom,
+    initialLength,
+    iterations,
+    phototropism,
+    rules,
+    svgContainer?.svg.node,
+  ]);
 
   return (
     <>
       <InPortal>
         <div className="flex flex-col p-4 space-y-5">
+          <div className="space-y-3">
+            <Label className="font-mono text-sm">Axiom</Label>
+            <Input
+              type="text"
+              value={axiom}
+              onChange={(v) => setAxiom(v.target.value)}
+              className="font-mono"
+            />
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium leading-none">Rules</h2>
+            {Object.entries(rules).map(([key, value]) => (
+              <div key={key} className="flex flex-row space-x-2">
+                <Label
+                  htmlFor={key}
+                  className="flex flex-row items-center space-x-2 font-mono text-sm"
+                >
+                  <span>{key}</span> <MoveRight className="w-4 h-4" />
+                </Label>
+                <Input
+                  id={key}
+                  type="text"
+                  value={value}
+                  onChange={(v) =>
+                    setRules((prev) => ({
+                      ...prev,
+                      [key]: v.target.value,
+                    }))
+                  }
+                  className="font-mono"
+                />
+              </div>
+            ))}
+          </div>
           <SliderWithDiscreteInput
             label="Scale"
             min={1}
@@ -219,4 +273,15 @@ export function LSystemSVG() {
       <SvgContainer setHandles={setHandles} height="100%" width="100%" />
     </>
   );
+}
+
+function formatObjectForFilename<T extends Record<string, unknown>>(obj: T) {
+  const jsonString = JSON.stringify(obj, null, 0);
+
+  const formattedString = jsonString
+    .replace(/,/g, '_') // Replace commas with underscores
+    .replace(/\s+/g, '_') // Replace spaces with underscores
+    .replace(/_+/g, '_'); // Condense multiple underscores into one
+
+  return formattedString;
 }
