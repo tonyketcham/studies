@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+  font-size: 0.9rem;
+}
+
 body {
   @apply bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100;
 }
