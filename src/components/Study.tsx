@@ -57,7 +57,7 @@ export function Study({
           isMobileSidebarOpen ? "translate-y-0" : "translate-y-full"
         )}
       >
-        <section className="mx-4 mb-20 max-h-[70vh] overflow-y-auto border shadow-lg rounded-xl bg-white/95 dark:border-neutral-900 outline outline-1 outline-offset-2 outline-neutral-400 dark:bg-neutral-900/95 dark:outline-neutral-600 backdrop-blur-lg">
+        <section className="mx-4 mb-20 min-h-[50vh] max-h-[80vh] overflow-y-auto border shadow-lg rounded-xl bg-white/95 dark:border-neutral-900 outline outline-1 outline-offset-2 outline-neutral-400 dark:bg-neutral-900/95 dark:outline-neutral-600 backdrop-blur-lg">
           {sidebarChildren}
         </section>
       </div>
