@@ -483,11 +483,16 @@ export class TreeSimulation {
 
   // ------------------------------------------------------------------ metrics
   getMetrics(fps: number): Metrics {
-    const cRatio = this.carbon / RESERVE_CAP;
-    const wRatio = this.water / RESERVE_CAP;
+    // availability blends the stored reserve with the current supply rate, so
+    // the readout reflects what the grower is tweaking even on a mature tree
+    // whose pools happen to be full.
+    const carbonAvail =
+      0.5 * (this.carbon / RESERVE_CAP) + 0.5 * (this.production / PHOTO_K);
+    const waterAvail =
+      0.5 * (this.water / RESERVE_CAP) + 0.5 * (this.uptake / UPT_K);
     let limiting: Metrics['limiting'] = 'balanced';
-    if (cRatio < 0.6 || wRatio < 0.6) {
-      limiting = cRatio <= wRatio ? 'carbon' : 'water';
+    if (Math.abs(carbonAvail - waterAvail) > 0.2) {
+      limiting = carbonAvail < waterAvail ? 'carbon' : 'water';
     }
     return {
       production: this.production,

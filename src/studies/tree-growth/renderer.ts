@@ -119,7 +119,7 @@ export class TreeRenderer {
 
     // --- branch / root / leaf meshes -------------------------------------
     const branchGeo = new THREE.CylinderGeometry(1, 1, 1, 6, 1);
-    const branchMat = this.makeWindMaterial(0x6b4a2f, 0.012, 0.85);
+    const branchMat = this.makeWindMaterial(0x6b4a2f, 0.012);
     this.branches = new THREE.InstancedMesh(branchGeo, branchMat, MAX_SHOOT_SEG);
     this.branches.count = 0;
     this.branches.frustumCulled = false;
@@ -127,7 +127,7 @@ export class TreeRenderer {
     this.disposables.push(branchGeo, branchMat);
 
     const rootGeo = new THREE.CylinderGeometry(1, 1, 1, 5, 1);
-    const rootMat = this.makeWindMaterial(0x7a5a3a, 0, 1);
+    const rootMat = this.makeWindMaterial(0x7a5a3a, 0);
     rootMat.transparent = true;
     rootMat.opacity = 0.92;
     this.roots = new THREE.InstancedMesh(rootGeo, rootMat, MAX_ROOT_SEG);
@@ -137,9 +137,8 @@ export class TreeRenderer {
     this.disposables.push(rootGeo, rootMat);
 
     const leafGeo = new THREE.CircleGeometry(0.5, 5);
-    const leafMat = this.makeWindMaterial(0x4e9a3d, 0.05, 1);
+    const leafMat = this.makeWindMaterial(0x4e9a3d, 0.05);
     leafMat.side = THREE.DoubleSide;
-    leafMat.roughness = 0.7;
     this.leaves = new THREE.InstancedMesh(leafGeo, leafMat, MAX_LEAVES);
     this.leaves.count = 0;
     this.leaves.frustumCulled = false;
@@ -159,14 +158,9 @@ export class TreeRenderer {
 
   private makeWindMaterial(
     color: number,
-    swayMul: number,
-    rough: number
-  ): THREE.MeshStandardMaterial {
-    const mat = new THREE.MeshStandardMaterial({
-      color,
-      roughness: rough,
-      metalness: 0,
-    });
+    swayMul: number
+  ): THREE.MeshLambertMaterial {
+    const mat = new THREE.MeshLambertMaterial({ color });
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = this.wind.uTime;
       shader.uniforms.uWind = this.wind.uWind;
