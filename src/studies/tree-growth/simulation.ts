@@ -11,6 +11,11 @@
  * "balanced" allocation) biases investment toward the organ that captures it —
  * the classic functional-equilibrium feedback loop.
  *
+ * Growth advances in discrete space-colonization *iterations* paced by a growth
+ * clock: each iteration pushes the whole active growth front forward by one
+ * internode (so depth, and therefore leaves and photosynthesis, ramps up
+ * quickly), while resource affordability caps how much of the front can grow.
+ *
  * All state lives in preallocated typed arrays and the per-frame work is
  * hard-capped, so the cost stays bounded no matter how large the tree gets.
  */
@@ -39,20 +44,20 @@ const PHOTO_A = 0.0016; // photosynthesis saturation (self-shading)
 const UPT_K = 16; // max water/sec at full root mass
 const UPT_A = 0.0022; // uptake saturation
 const RESERVE_CAP = 60;
-const START_RESERVE = 22; // bootstrap so the seedling can grow before it has leaves
+const START_RESERVE = 24; // bootstrap so the seedling can grow before it has leaves
 
 // carbon / water cost per new node (shoots are carbon-hungry, roots water-hungry)
-const COST_C_SHOOT = 1.0;
-const COST_W_SHOOT = 0.4;
-const COST_C_ROOT = 0.4;
-const COST_W_ROOT = 1.0;
+const COST_C_SHOOT = 0.9;
+const COST_W_SHOOT = 0.35;
+const COST_C_ROOT = 0.35;
+const COST_W_ROOT = 0.9;
 
-const BASE_RATE = 58; // baseline nodes/sec at growthSpeed = 1
-const MAX_NODES_PER_FRAME = 34; // hard cap per organ per frame (anti-spike)
-const MAX_ITERS_PER_FRAME = 8;
+// growth pacing: space-colonization iterations per second at growthSpeed = 1
+const ITER_RATE = 7;
+const MAX_ITERS_PER_FRAME = 4;
 
-const LEAF_MIN_DEPTH = 3;
-const LEAF_PROB = 0.72;
+const LEAF_MIN_DEPTH = 2;
+const LEAF_PROB = 0.85;
 
 interface DirAcc {
   x: number;
@@ -93,6 +98,8 @@ export class TreeSimulation {
   // growth fronts (small, active node indices)
   private shootActive: number[] = [];
   private rootActive: number[] = [];
+  private shootClock = 0;
+  private rootClock = 0;
 
   // running counts
   private shootSeg = 0;
@@ -128,6 +135,8 @@ export class TreeSimulation {
     this.rootSeg = 0;
     this.shootActive = [];
     this.rootActive = [];
+    this.shootClock = 0;
+    this.rootClock = 0;
     this.carbon = START_RESERVE;
     this.water = START_RESERVE;
     this.production = 0;
@@ -157,25 +166,24 @@ export class TreeSimulation {
     // canopy: an ellipsoid sitting above the ground
     this.canopyCount = canopyN;
     const cR = 10 + 2 * density;
-    const cYmin = 5;
-    const cYmax = 25;
+    const cYmin = 4;
+    const cYmax = 24;
     for (let i = 0; i < canopyN; i++) {
       const [x, z] = diskSample(cR);
-      // bias points toward the upper-middle for a rounded crown
       const t = Math.cbrt(Math.random());
       this.canopyX[i] = x * t + (1 - t) * x * 0.4;
       this.canopyZ[i] = z * t + (1 - t) * z * 0.4;
       const yt = Math.random();
-      this.canopyY[i] = cYmin + (cYmax - cYmin) * (0.25 + 0.75 * yt);
+      this.canopyY[i] = cYmin + (cYmax - cYmin) * (0.2 + 0.8 * yt);
       this.canopyAlive[i] = 1;
     }
 
     // roots: a downward, outward-spreading cone of nutrient sites
     this.rootAttrCount = rootN;
     for (let i = 0; i < rootN; i++) {
-      const depth = Math.random();
-      const y = -0.8 - soilDepth * depth;
-      const spread = 3 + 8 * depth; // wider as it goes deeper
+      const d = Math.random();
+      const y = -0.8 - soilDepth * d;
+      const spread = 3 + 8 * d;
       const [x, z] = diskSample(spread);
       this.rootX[i] = x;
       this.rootY[i] = y;
@@ -192,43 +200,41 @@ export class TreeSimulation {
     // 1. resource production / uptake (saturating curves)
     const leafArea = this.leafCount * p.leafSize * p.leafSize;
     this.production = p.sunlight * PHOTO_K * (1 - Math.exp(-PHOTO_A * leafArea));
-    const soilFactor =
-      p.soil === 'poor' ? 0.6 : p.soil === 'rich' ? 1.5 : 1;
+    const soilFactor = p.soil === 'poor' ? 0.6 : p.soil === 'rich' ? 1.5 : 1;
     this.uptake =
       p.nutrients * soilFactor * UPT_K * (1 - Math.exp(-UPT_A * this.rootSeg));
 
     this.carbon = Math.min(RESERVE_CAP, this.carbon + this.production * dt);
     this.water = Math.min(RESERVE_CAP, this.water + this.uptake * dt);
 
-    // 2. growth pace (nodes attempted this frame) and shoot/root split
-    const pace = BASE_RATE * p.growthSpeed * dt;
-    const split = this.allocationSplit(p); // fraction to shoots
-    let shootTry = Math.round(pace * split);
-    let rootTry = Math.round(pace * (1 - split));
+    // 2. advance growth clocks (iterations are biased by the allocation split)
+    const split = this.allocationSplit(p);
+    const rate = dt * p.growthSpeed * ITER_RATE;
+    this.shootClock += rate * 2 * split;
+    this.rootClock += rate * 2 * (1 - split);
 
-    // 3. clamp by what the reserves can afford, then grow + deduct
-    shootTry = Math.min(
-      shootTry,
-      MAX_NODES_PER_FRAME,
-      Math.floor(this.carbon / COST_C_SHOOT),
-      Math.floor(this.water / COST_W_SHOOT)
-    );
-    rootTry = Math.min(
-      rootTry,
-      MAX_NODES_PER_FRAME,
-      Math.floor(this.carbon / COST_C_ROOT),
-      Math.floor(this.water / COST_W_ROOT)
-    );
+    // 3. run paced space-colonization iterations (resource-gated inside)
+    let grew = false;
+    let iters = 0;
+    while (
+      iters < MAX_ITERS_PER_FRAME &&
+      (this.shootClock >= 1 || this.rootClock >= 1)
+    ) {
+      if (this.shootClock >= 1) {
+        this.shootClock -= 1;
+        if (this.runIteration(KIND_SHOOT)) grew = true;
+      }
+      if (this.rootClock >= 1) {
+        this.rootClock -= 1;
+        if (this.runIteration(KIND_ROOT)) grew = true;
+      }
+      iters++;
+    }
+    // avoid clock build-up while resource-starved
+    if (this.shootClock > 2) this.shootClock = 2;
+    if (this.rootClock > 2) this.rootClock = 2;
 
-    const grownShoot = this.growKind(KIND_SHOOT, Math.max(0, shootTry));
-    const grownRoot = this.growKind(KIND_ROOT, Math.max(0, rootTry));
-
-    this.carbon -= grownShoot * COST_C_SHOOT + grownRoot * COST_C_ROOT;
-    this.water -= grownShoot * COST_W_SHOOT + grownRoot * COST_W_ROOT;
-    this.carbon = Math.max(0, this.carbon);
-    this.water = Math.max(0, this.water);
-
-    if (grownShoot + grownRoot > 0) this.structureVersion++;
+    if (grew) this.structureVersion++;
   }
 
   /** Fraction of growth budget that should go to shoots. */
@@ -236,121 +242,111 @@ export class TreeSimulation {
     if (p.allocation === 'shoots') return 0.82;
     if (p.allocation === 'roots') return 0.18;
     // balanced → functional equilibrium: invest in the organ that gathers the
-    // scarce resource. Carbon-limited → grow shoots (more leaves); water-limited
+    // scarce resource. Carbon scarce → grow shoots (more leaves); water scarce
     // → grow roots.
     const cRatio = this.carbon / RESERVE_CAP;
     const wRatio = this.water / RESERVE_CAP;
     const total = cRatio + wRatio || 1;
-    // when carbon is scarce relative to water, push shoots, and vice-versa
     const shootBias = wRatio / total; // low carbon → wRatio dominates → more shoots
-    return 0.3 + 0.4 * shootBias; // keep within [0.3, 0.7] for stability
+    return 0.32 + 0.36 * shootBias; // clamp to a stable [0.32, 0.68] band
   }
 
-  private growKind(kind: number, budget: number): number {
-    if (budget <= 0) return 0;
+  /**
+   * One space-colonization iteration for the given organ: every active node
+   * that is pulled by a live attractor spawns one child toward the average
+   * attractor direction (plus a tropism bias), provided the reserves can pay
+   * for it. Returns true if at least one node was added.
+   */
+  private runIteration(kind: number): boolean {
     const active = kind === KIND_ROOT ? this.rootActive : this.shootActive;
-    if (active.length === 0) return 0;
+    if (active.length === 0) return false;
 
-    let added = 0;
-    let iter = 0;
-    let current = active;
+    this.buildGrid(active);
 
-    while (added < budget && iter < MAX_ITERS_PER_FRAME) {
-      this.buildGrid(current);
+    const n = kind === KIND_ROOT ? this.rootAttrCount : this.canopyCount;
+    const ax = kind === KIND_ROOT ? this.rootX : this.canopyX;
+    const ay = kind === KIND_ROOT ? this.rootY : this.canopyY;
+    const az = kind === KIND_ROOT ? this.rootZ : this.canopyZ;
+    const alive = kind === KIND_ROOT ? this.rootAlive : this.canopyAlive;
 
-      // accumulate attractor pull per active node
-      const infl = new Map<number, DirAcc>();
-      const n = kind === KIND_ROOT ? this.rootAttrCount : this.canopyCount;
-      const ax = kind === KIND_ROOT ? this.rootX : this.canopyX;
-      const ay = kind === KIND_ROOT ? this.rootY : this.canopyY;
-      const az = kind === KIND_ROOT ? this.rootZ : this.canopyZ;
-      const alive = kind === KIND_ROOT ? this.rootAlive : this.canopyAlive;
-
-      for (let i = 0; i < n; i++) {
-        if (!alive[i]) continue;
-        const near = this.nearest(ax[i], ay[i], az[i], INFLUENCE);
-        if (near < 0) continue;
-        let dx = ax[i] - this.px[near];
-        let dy = ay[i] - this.py[near];
-        let dz = az[i] - this.pz[near];
-        const len = Math.hypot(dx, dy, dz) || 1;
-        dx /= len;
-        dy /= len;
-        dz /= len;
-        const acc = infl.get(near);
-        if (acc) {
-          acc.x += dx;
-          acc.y += dy;
-          acc.z += dz;
-        } else {
-          infl.set(near, { x: dx, y: dy, z: dz });
-        }
+    const infl = new Map<number, DirAcc>();
+    for (let i = 0; i < n; i++) {
+      if (!alive[i]) continue;
+      const near = this.nearest(ax[i], ay[i], az[i], INFLUENCE);
+      if (near < 0) continue;
+      let dx = ax[i] - this.px[near];
+      let dy = ay[i] - this.py[near];
+      let dz = az[i] - this.pz[near];
+      const len = Math.hypot(dx, dy, dz) || 1;
+      dx /= len;
+      dy /= len;
+      dz /= len;
+      const acc = infl.get(near);
+      if (acc) {
+        acc.x += dx;
+        acc.y += dy;
+        acc.z += dz;
+      } else {
+        infl.set(near, { x: dx, y: dy, z: dz });
       }
-
-      if (infl.size === 0) break;
-
-      const next: number[] = [];
-      const seen = new Set<number>();
-      for (const [idx, acc] of infl) {
-        if (added >= budget) {
-          if (!seen.has(idx)) {
-            seen.add(idx);
-            next.push(idx); // defer to next frame
-          }
-          continue;
-        }
-        // blend attractor direction with a tropism bias
-        let dx = acc.x;
-        let dy = acc.y;
-        let dz = acc.z;
-        this.applyTropism(kind, idx, (bx, by, bz) => {
-          dx += bx;
-          dy += by;
-          dz += bz;
-        });
-        const len = Math.hypot(dx, dy, dz) || 1;
-        const nx = this.px[idx] + (dx / len) * SEG_LEN;
-        const ny = this.py[idx] + (dy / len) * SEG_LEN;
-        const nz = this.pz[idx] + (dz / len) * SEG_LEN;
-
-        const child = this.addNode(nx, ny, nz, idx, kind, this.depth[idx] + 1);
-        if (child < 0) break; // node pool full
-        if (kind === KIND_ROOT) this.rootSeg++;
-        else this.shootSeg++;
-
-        // leaves only on the canopy, above a minimum depth
-        if (
-          kind === KIND_SHOOT &&
-          this.depth[child] >= LEAF_MIN_DEPTH &&
-          Math.random() < LEAF_PROB
-        ) {
-          this.addLeaf(child);
-        }
-
-        added++;
-        if (!seen.has(idx)) {
-          seen.add(idx);
-          next.push(idx); // parent may keep branching
-        }
-        next.push(child);
-      }
-
-      // prune attractors reached by the (updated) front
-      this.buildGrid(next);
-      this.pruneAttractors(kind);
-
-      current = next;
-      iter++;
     }
 
-    if (kind === KIND_ROOT) this.rootActive = current;
-    else this.shootActive = current;
-    return added;
+    if (infl.size === 0) return false;
+
+    const costC = kind === KIND_ROOT ? COST_C_ROOT : COST_C_SHOOT;
+    const costW = kind === KIND_ROOT ? COST_W_ROOT : COST_W_SHOOT;
+
+    const next: number[] = [];
+    const seen = new Set<number>();
+    let added = 0;
+    for (const [idx, acc] of infl) {
+      seen.add(idx);
+      next.push(idx); // keep the parent on the front so it can branch
+      // resource gate: stop growing this organ once it can't pay
+      if (this.carbon < costC || this.water < costW) continue;
+
+      let dx = acc.x;
+      let dy = acc.y;
+      let dz = acc.z;
+      this.applyTropism(kind, (bx, by, bz) => {
+        dx += bx;
+        dy += by;
+        dz += bz;
+      });
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const nx = this.px[idx] + (dx / len) * SEG_LEN;
+      const ny = this.py[idx] + (dy / len) * SEG_LEN;
+      const nz = this.pz[idx] + (dz / len) * SEG_LEN;
+
+      const child = this.addNode(nx, ny, nz, idx, kind, this.depth[idx] + 1);
+      if (child < 0) break; // node pool full
+      if (kind === KIND_ROOT) this.rootSeg++;
+      else this.shootSeg++;
+      this.carbon -= costC;
+      this.water -= costW;
+      added++;
+
+      if (
+        kind === KIND_SHOOT &&
+        this.depth[child] >= LEAF_MIN_DEPTH &&
+        Math.random() < LEAF_PROB
+      ) {
+        this.addLeaf(child);
+      }
+      next.push(child);
+    }
+
+    // prune attractors reached by the advanced front, then retire dead nodes
+    this.buildGrid(next);
+    this.pruneAttractors(kind);
+
+    if (kind === KIND_ROOT) this.rootActive = next;
+    else this.shootActive = next;
+    return added > 0;
   }
 
   private applyTropism(
     kind: number,
-    _idx: number,
     add: (x: number, y: number, z: number) => void
   ): void {
     if (kind === KIND_ROOT) {
@@ -360,8 +356,8 @@ export class TreeSimulation {
     // canopy: phototropism (up + horizontal toward the light)
     add(0, 0.35, 0);
     const dir = this.params.lightDir;
-    if (dir === 'left') add(-0.4, 0.1, 0);
-    else if (dir === 'right') add(0.4, 0.1, 0);
+    if (dir === 'left') add(-0.45, 0.1, 0);
+    else if (dir === 'right') add(0.45, 0.1, 0);
   }
 
   // --------------------------------------------------------------------- nodes
@@ -442,8 +438,7 @@ export class TreeSimulation {
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         for (let dz = -1; dz <= 1; dz++) {
-          const key =
-            (ix + dx) | ((iy + dy) << 10) | ((iz + dz) << 20);
+          const key = (ix + dx) | ((iy + dy) << 10) | ((iz + dz) << 20);
           const bucket = this.grid.get(key);
           if (!bucket) continue;
           for (let b = 0; b < bucket.length; b++) {
