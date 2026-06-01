@@ -40,24 +40,25 @@ const GRID_OFFSET = 512; // keeps cell indices non-negative
 
 // --- Resource economy ------------------------------------------------------
 const PHOTO_K = 16; // max carbon/sec at full leaf area
-const PHOTO_A = 0.0016; // photosynthesis saturation (self-shading)
+const PHOTO_A = 0.006; // photosynthesis saturation (self-shading)
 const UPT_K = 16; // max water/sec at full root mass
-const UPT_A = 0.0022; // uptake saturation
+const UPT_A = 0.006; // uptake saturation
 const RESERVE_CAP = 60;
-const START_RESERVE = 24; // bootstrap so the seedling can grow before it has leaves
+const START_RESERVE = 20; // bootstrap so the seedling can grow before it has leaves
 
 // carbon / water cost per new node (shoots are carbon-hungry, roots water-hungry)
-const COST_C_SHOOT = 0.9;
-const COST_W_SHOOT = 0.35;
-const COST_C_ROOT = 0.35;
-const COST_W_ROOT = 0.9;
+const COST_C_SHOOT = 0.45;
+const COST_W_SHOOT = 0.18;
+const COST_C_ROOT = 0.18;
+const COST_W_ROOT = 0.45;
 
 // growth pacing: space-colonization iterations per second at growthSpeed = 1
-const ITER_RATE = 7;
-const MAX_ITERS_PER_FRAME = 4;
+const ITER_RATE = 2.2;
+const MAX_ITERS_PER_FRAME = 3;
 
 const LEAF_MIN_DEPTH = 2;
 const LEAF_PROB = 0.85;
+const TRUNK_NODES = 3; // pre-grown starter trunk height (internodes)
 
 interface DirAcc {
   x: number;
@@ -146,8 +147,17 @@ export class TreeSimulation {
     const base = this.addNode(0, 0, 0, -1, KIND_SHOOT, 0);
     const rootBase = this.addNode(0, -0.3, 0, base, KIND_ROOT, 1);
     this.rootSeg++;
-    this.shootActive.push(base);
     this.rootActive.push(rootBase);
+
+    // pre-grow a short vertical trunk so the canopy growth front starts up
+    // among the light attractors (a bare seed at y=0 is out of their reach).
+    let prev = base;
+    for (let i = 1; i <= TRUNK_NODES; i++) {
+      const n = this.addNode(0, i * SEG_LEN, 0, prev, KIND_SHOOT, i);
+      this.shootSeg++;
+      prev = n;
+    }
+    this.shootActive.push(prev);
 
     this.seedAttractors(params);
     this.structureVersion++;
@@ -166,15 +176,15 @@ export class TreeSimulation {
     // canopy: an ellipsoid sitting above the ground
     this.canopyCount = canopyN;
     const cR = 10 + 2 * density;
-    const cYmin = 4;
+    const cYmin = 3.5;
     const cYmax = 24;
     for (let i = 0; i < canopyN; i++) {
       const [x, z] = diskSample(cR);
       const t = Math.cbrt(Math.random());
       this.canopyX[i] = x * t + (1 - t) * x * 0.4;
       this.canopyZ[i] = z * t + (1 - t) * z * 0.4;
-      const yt = Math.random();
-      this.canopyY[i] = cYmin + (cYmax - cYmin) * (0.2 + 0.8 * yt);
+      const yt = Math.pow(Math.random(), 0.85);
+      this.canopyY[i] = cYmin + (cYmax - cYmin) * yt;
       this.canopyAlive[i] = 1;
     }
 
